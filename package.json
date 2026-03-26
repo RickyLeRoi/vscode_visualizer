@@ -3,7 +3,7 @@
   "displayName": ".NET Data Visualizer for VS Code",
   "description": "Visualize DataSet, DataTable, List, Dictionary and other .NET collections during C# debugging in VS Code.",
   "version": "1.0.0",
-  "publisher": "dotnet-visualizer",
+  "publisher": "RickyLeRoi",
   "repository": { 
     "type": "git", 
     "url": "https://github.com/RickyLeRoi/vscode_visualizer" 
