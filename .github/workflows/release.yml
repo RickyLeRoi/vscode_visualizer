@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # triggered by tags like v1.0.0, v1.2.3-beta
+
+jobs:
+  release:
+    name: Package & publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # needed to create the GitHub Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      # ── Read the version from package.json ──────────────────────────────────
+      - name: Read version
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # ── Build the .vsix package ─────────────────────────────────────────────
+      - name: Package extension
+        run: npx vsce package --no-dependencies -o vscode-dotnet-data-visualizer-${{ steps.pkg.outputs.version }}.vsix
+
+      # ── Create GitHub Release and attach the .vsix ──────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: vscode-dotnet-data-visualizer-${{ steps.pkg.outputs.version }}.vsix
+          generate_release_notes: true
+
+      # ── Publish to Visual Studio Marketplace ────────────────────────────────
+      # Requires a secret named VSCE_PAT (Azure DevOps Personal Access Token
+      # with scope "Marketplace → publish").
+      # To skip marketplace publishing, remove this step.
+      - name: Publish to VS Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        run: npx vsce publish --no-dependencies --pat ${{ secrets.VSCE_PAT }}
+
+      # ── Publish to Open VSX Registry ────────────────────────────────────────
+      # Requires a secret named OVSX_PAT (token from open-vsx.org).
+      # To skip Open VSX publishing, remove this step.
+      - name: Publish to Open VSX
+        if: ${{ secrets.OVSX_PAT != '' }}
+        run: npx ovsx publish vscode-dotnet-data-visualizer-${{ steps.pkg.outputs.version }}.vsix --pat ${{ secrets.OVSX_PAT }}

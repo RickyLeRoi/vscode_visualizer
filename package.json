@@ -1,0 +1,92 @@
+{
+  "name": "vscode-dotnet-data-visualizer",
+  "displayName": ".NET Data Visualizer for VS Code",
+  "description": "Visualize DataSet, DataTable, List, Dictionary and other .NET collections during C# debugging in VS Code.",
+  "version": "1.0.0",
+  "publisher": "dotnet-visualizer",
+  "repository": { 
+    "type": "git", 
+    "url": "https://github.com/RickyLeRoi/vscode_visualizer" 
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark" 
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Visualization"
+  ],
+  "keywords": [
+    "dotnet",
+    "csharp",
+    "debugger",
+    "visualizer",
+    "DataTable",
+    "DataSet",
+    "List",
+    "Dictionary"
+  ],
+  "activationEvents": [
+    "onDebug"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dotnetVisualizer.visualize",
+        "title": ".NET Visualizer: Visualize Expression",
+        "icon": "$(table)"
+      },
+      {
+        "command": "dotnetVisualizer.visualizeFromVariables",
+        "title": "Visualize with .NET Visualizer",
+        "icon": "$(table)"
+      }
+    ],
+    "menus": {
+      "debug/variables/context": [
+        {
+          "command": "dotnetVisualizer.visualizeFromVariables",
+          "when": "debugType == 'coreclr' || debugType == 'clr'",
+          "group": "z_dotnetvisualizer@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": ".NET Data Visualizer",
+      "properties": {
+        "dotnetVisualizer.maxRows": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Maximum number of DataTable rows to fetch (more rows = slower)."
+        },
+        "dotnetVisualizer.maxItems": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Maximum number of List/Dictionary items to fetch."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node --no-deprecation node_modules/typescript/bin/tsc -p ./",
+    "watch": "node --no-deprecation node_modules/typescript/bin/tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.3.3"
+  }
+}
