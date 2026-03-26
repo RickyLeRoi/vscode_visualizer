@@ -1,4 +1,4 @@
-name: CI
+name: Validate
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Compile & lint
+    name: Validate build
     runs-on: ubuntu-latest
 
     steps:

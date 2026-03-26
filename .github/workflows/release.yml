@@ -13,6 +13,10 @@ jobs:
     permissions:
       contents: write   # needed to create the GitHub Release
 
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,12 +54,12 @@ jobs:
       # with scope "Marketplace → publish").
       # To skip marketplace publishing, remove this step.
       - name: Publish to VS Marketplace
-        if: ${{ secrets.VSCE_PAT != '' }}
+        if: env.VSCE_PAT != ''
         run: npx vsce publish --no-dependencies --pat ${{ secrets.VSCE_PAT }}
 
       # ── Publish to Open VSX Registry ────────────────────────────────────────
       # Requires a secret named OVSX_PAT (token from open-vsx.org).
       # To skip Open VSX publishing, remove this step.
       - name: Publish to Open VSX
-        if: ${{ secrets.OVSX_PAT != '' }}
+        if: env.OVSX_PAT != ''
         run: npx ovsx publish vscode-dotnet-data-visualizer-${{ steps.pkg.outputs.version }}.vsix --pat ${{ secrets.OVSX_PAT }}
