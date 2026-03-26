@@ -1,6 +1,6 @@
-# .NET Data Visualizer
+# .NET Data Visualizer for VS Code
 
-A Visual Studio Code extension to inspect and visualize .NET data structures during a C# debug session.
+Visualize DataSet, DataTable, List, Dictionary and other .NET collections during C# debugging in VS Code.
 
 Supported types:
 
@@ -73,8 +73,8 @@ Type in the search box to filter rows in real time — works across all columns/
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `dotnetVisualizer.maxRows` | `1000` | Maximum DataTable rows fetched per table. Increase for larger datasets (slower). |
-| `dotnetVisualizer.maxItems` | `10000` | Maximum List/Dictionary items fetched. |
+| `dotnetVisualizer.maxRows` | `500` | Maximum DataTable rows fetched per table. Increase for larger datasets (slower). |
+| `dotnetVisualizer.maxItems` | `2000` | Maximum List/Dictionary items fetched. |
 
 > **Note:** fetching data from the debugger is sequential — large limits will make the visualizer slower to open.
 
@@ -84,8 +84,85 @@ Type in the search box to filter rows in real time — works across all columns/
 
 - Only works while the debugger is **paused** (breakpoint / exception).
 - Complex nested objects in a `DataTable` cell are shown as their `.ToString()` value.
-- Dictionary extraction uses `System.Linq.Enumerable.ElementAt`, which requires .NET 3.5+.
-- Very large collections (>2 000 items) are intentionally truncated for performance.
+- Very large collections are intentionally truncated for performance (configurable via settings).
+
+---
+
+## CI / CD (GitHub Actions)
+
+Two workflows are included in `.github/workflows/`:
+
+### `ci.yml` — runs on every push and pull request
+
+- Installs dependencies (`npm ci`)
+- Compiles TypeScript (`npm run compile`)
+- Uploads the `out/` folder as a build artifact
+
+### `release.yml` — runs when a tag matching `v*.*.*` is pushed
+
+- Compiles and packages the `.vsix`
+- Creates a **GitHub Release** with the `.vsix` attached and auto-generated release notes
+- Publishes to the **Visual Studio Marketplace** (requires secret `VSCE_PAT`)
+- Publishes to the **Open VSX Registry** (requires secret `OVSX_PAT`)
+
+The publish steps are conditional — if the corresponding secret is not set, the step is skipped automatically.
+
+#### How to trigger a release
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+#### Required GitHub secrets
+
+| Secret | Description |
+|--------|-------------|
+| `VSCE_PAT` | Azure DevOps PAT with scope `Marketplace → publish` |
+| `OVSX_PAT` | Token from [open-vsx.org](https://open-vsx.org) |
+
+Add them under **Settings → Secrets and variables → Actions** in the GitHub repository.
+
+---
+
+## Distribution
+
+### Package as `.vsix` (manual install)
+
+```bash
+npx vsce package
+```
+
+Generates `vscode-dotnet-data-visualizer-1.0.0.vsix`. Install it with:
+
+```bash
+code --install-extension vscode-dotnet-data-visualizer-1.0.0.vsix
+```
+
+Or from VS Code: **Extensions** → `···` → **Install from VSIX…**
+
+### Publish to Visual Studio Marketplace
+
+1. Create a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
+2. Generate a Personal Access Token (PAT) on Azure DevOps with scope `Marketplace (publish)`
+3. Login and publish:
+
+```bash
+npx vsce login <publisher-id>
+npx vsce publish
+```
+
+Or in a single command:
+
+```bash
+npx vsce publish --pat <YOUR_PAT>
+```
+
+### Publish to Open VSX Registry (VS Codium / other forks)
+
+```bash
+npx ovsx publish vscode-dotnet-data-visualizer-1.0.0.vsix --pat <OPENVSX_TOKEN>
+```
 
 ---
 
@@ -93,7 +170,7 @@ Type in the search box to filter rows in real time — works across all columns/
 
 ```bash
 # Clone and install
-git clone <repo-url>
+git clone https://github.com/RickyLeRoi/vscode_visualizer.git
 cd vscode_visualizer
 npm install
 
