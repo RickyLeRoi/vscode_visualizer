@@ -4,13 +4,14 @@ Visualize DataSet, DataTable, List, Dictionary and other .NET collections during
 
 Supported types:
 
-| Type | Visualizzazione |
-|------|----------------|
-| `DataTable` | Griglia con colonne ordinabili e tipo nel tooltip |
-| `DataSet` | Tab per ogni `DataTable` contenuta |
-| `List<T>` / `T[]` / `IEnumerable<T>` | Tabella indice → valore |
-| `Dictionary<K,V>` / `Hashtable` / `SortedDictionary` | Tabella chiave → valore |
-| Qualunque oggetto | Property browser (via DAP `variables`) |
+| Type | Display |
+|------|---------|
+| `DataTable` | Grid with sortable columns and .NET type in header tooltip |
+| `DataSet` | One tab per `DataTable` |
+| `List<T>` / `T[]` / `IEnumerable<T>` | Index → value table |
+| `Dictionary<K,V>` / `Hashtable` / `SortedDictionary` | Key → value table |
+| `string` | String Viewer with Plain / JSON / Markdown modes |
+| Any object | Property browser (via DAP `variables`) |
 
 All views support **real-time text filtering**, **column sorting**, **CSV export** and **clipboard copy**.
 
@@ -74,6 +75,26 @@ There are four ways to open the visualizer:
 - Keys and values are shown side by side.
 - Works with `Dictionary<K,V>`, `SortedDictionary<K,V>`, `ConcurrentDictionary<K,V>`, `Hashtable`.
 
+### String Viewer
+
+When a `string` variable is visualized, the **String Viewer** opens below the main grid with three rendering modes:
+
+| Mode | Description |
+|------|-------------|
+| **Plain** | Raw text in a monospace `<pre>` block |
+| **JSON** | Pretty-printed and indented JSON (handles C# debugger-quoted values automatically) |
+| **Markdown** | Rendered Markdown preview via `markdown-it` (scripts and dangerous attributes are stripped) |
+
+Click a mode button to switch at any time. The viewer auto-detects the best mode on first open.
+
+### Show More
+
+When a collection is larger than the current fetch limit, a **Show More** button appears at the bottom of the view. Clicking it doubles `maxRows` / `maxItems` for that expression and re-fetches, loading progressively more data without changing your global settings.
+
+### Live Visualizer
+
+When `dotnetVisualizer.liveVisualizer` is enabled, clicking anywhere in the editor during a debug session automatically visualizes the identifier under the cursor — no manual invocation needed.
+
 ### Filter
 
 Type in the search box to filter rows in real time — works across all columns/values.
@@ -89,10 +110,11 @@ Type in the search box to filter rows in real time — works across all columns/
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `dotnetVisualizer.maxRows` | `500` | Maximum DataTable rows fetched per table. Increase for larger datasets (slower). |
-| `dotnetVisualizer.maxItems` | `2000` | Maximum List/Dictionary items fetched. |
+| `dotnetVisualizer.maxRows` | `100` | Maximum DataTable rows fetched per table. Increase for larger datasets (slower). Upper bound: `1000`. |
+| `dotnetVisualizer.maxItems` | `1000` | Maximum List/Dictionary items fetched. Upper bound: `10000`. |
+| `dotnetVisualizer.liveVisualizer` | `false` | When enabled, clicking in the editor during a debug session automatically visualizes the identifier under the cursor. |
 
-> **Note:** fetching data from the debugger is sequential — large limits will make the visualizer slower to open.
+> **Note:** fetching data from the debugger is sequential — large limits will make the visualizer slower to open. Use the **Show More** button to load additional data on demand instead of raising the limit globally.
 
 ---
 

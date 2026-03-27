@@ -23,6 +23,8 @@
   const searchInput  = /** @type {HTMLInputElement} */ (document.getElementById('searchInput'));
   const btnExport    = /** @type {HTMLButtonElement} */ (document.getElementById('btnExportCsv'));
   const btnCopy      = /** @type {HTMLButtonElement} */ (document.getElementById('btnCopyClip'));
+  const btnOpenValue = /** @type {HTMLButtonElement} */ (document.getElementById('btnOpenValue'));
+  const btnShowMore  = /** @type {HTMLButtonElement} */ (document.getElementById('btnShowMore'));
 
   // ── Message listener ───────────────────────────────────────────────────────
 
@@ -30,10 +32,15 @@
     const msg = event.data;
     if (msg.command === 'update') {
       currentData = msg.data;
+      // Store expression if provided by the host
+      currentData.__expression = msg.data.__expression || msg.data.expression || currentData.__expression;
       activeTableIndex = 0;
       sortCol = -1;
       sortAsc = true;
       filterText = searchInput.value = '';
+      render();
+    } else if (msg.command === 'rerender') {
+      // Panel became visible again — re-apply button state based on currentData
       render();
     }
   });
@@ -82,12 +89,26 @@
   // ── Main render ────────────────────────────────────────────────────────────
 
   function render() {
+    // Always reset contextual buttons first — handles retained-context state
+    // when the panel is re-shown without new data arriving.
+    if (btnOpenValue) { btnOpenValue.style.display = 'none'; btnOpenValue.onclick = null; }
+    if (btnShowMore)  { btnShowMore.style.display  = 'none'; btnShowMore.onclick  = null; }
+
     if (!currentData) return;
     tabsEl.innerHTML = '';
 
     switch (currentData.kind) {
       case 'datatable':
         renderDataTable(currentData);
+        // Show "Show More" when data is truncated
+        if (btnShowMore && currentData.truncated) {
+          btnShowMore.style.display = 'inline-block';
+          btnShowMore.onclick = () => {
+            if (currentData.__expression) {
+              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
+            }
+          };
+        }
         break;
       case 'dataset':
         renderDataSet(currentData);
@@ -95,12 +116,33 @@
       case 'list':
       case 'array':
         renderList(currentData);
+        if (btnShowMore && currentData.truncated) {
+          btnShowMore.style.display = 'inline-block';
+          btnShowMore.onclick = () => {
+            if (currentData.__expression) {
+              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
+            }
+          };
+        }
         break;
       case 'dictionary':
         renderDictionary(currentData);
+        if (btnShowMore && currentData.truncated) {
+          btnShowMore.style.display = 'inline-block';
+          btnShowMore.onclick = () => {
+            if (currentData.__expression) {
+              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
+            }
+          };
+        }
         break;
       default:
         renderUnknown(currentData);
+        // For unknown objects, show the View button when a displayValue exists
+        if (btnOpenValue && currentData.displayValue) {
+          btnOpenValue.style.display = 'inline-block';
+          btnOpenValue.onclick = () => openStringViewer(String(currentData.displayValue));
+        }
     }
   }
 
@@ -174,8 +216,10 @@
           td.className = 'null-value';
           td.textContent = 'null';
         } else {
+          td.className = 'cell-value';
           td.textContent = cell;
           td.title = cell;
+          td.addEventListener('click', () => openStringViewer(cell));
         }
       });
     });
@@ -261,7 +305,11 @@
       const td0 = tr.insertCell(); td0.textContent = String(it.index); td0.className = 'row-num';
       const td1 = tr.insertCell();
       if (it.value === '(null)') { td1.className = 'null-value'; td1.textContent = 'null'; }
-      else { td1.textContent = it.value; td1.title = it.value; }
+      else {
+        td1.className = 'cell-value';
+        td1.textContent = it.value; td1.title = it.value;
+        td1.addEventListener('click', () => openStringViewer(it.value));
+      }
     });
 
     contentEl.appendChild(table);
@@ -310,6 +358,16 @@
       else { tv.textContent = e.value; tv.title = e.value; }
     });
 
+    // make values clickable
+    tbody.querySelectorAll('td').forEach(td => {
+      if (td.classList.contains('null-value')) return;
+      if (td.cellIndex === 1) {
+        const v = td.textContent || '';
+        td.classList.add('cell-value');
+        td.addEventListener('click', () => openStringViewer(v));
+      }
+    });
+
     contentEl.appendChild(table);
     setStatus(
       filterText
@@ -335,11 +393,11 @@
       );
     }
 
-    if (props.length === 0) {
-      contentEl.innerHTML = `<p class="empty-msg">Value: ${escHtml(obj.displayValue)}</p>`;
-      setStatus('No properties');
-      return;
-    }
+      if (props.length === 0) {
+        contentEl.innerHTML = `<p class="empty-msg">Value: ${escHtml(obj.displayValue)}</p>`;
+        setStatus('No properties');
+        return;
+      }
 
     const table = document.createElement('table');
     table.className = 'prop-table';
@@ -358,6 +416,16 @@
       if (p.value === '(null)') { tv.className = 'null-value'; tv.textContent = 'null'; }
       else { tv.textContent = p.value; tv.title = p.value; }
       const tt = tr.insertCell(); tt.className = 'prop-type'; tt.textContent = p.typeName || '';
+    });
+
+    // make property values clickable
+    tbody.querySelectorAll('td').forEach(td => {
+      if (td.classList.contains('null-value')) return;
+      if (td.classList.contains('prop-type')) return;
+      if (td.classList.contains('prop-name')) return;
+      const v = td.textContent || '';
+      td.classList.add('cell-value');
+      td.addEventListener('click', () => openStringViewer(v));
     });
 
     contentEl.appendChild(table);
@@ -413,6 +481,141 @@
   }
 
   // ── Utilities ──────────────────────────────────────────────────────────────
+
+  // ── String viewer (Plain / JSON / Markdown) ────────────────────────────────
+  function openStringViewer(value) {
+    // create viewer container if missing
+    let viewer = document.getElementById('string-viewer');
+    // store current value on the viewer element so button handlers use latest
+    if (viewer) { viewer.__currentValue = value; }
+    if (!viewer) {
+      viewer = document.createElement('div');
+      viewer.id = 'string-viewer';
+      // sv-pre lives OUTSIDE sv-dynamic so it is never destroyed by innerHTML changes
+      viewer.innerHTML = `
+        <div class="sv-header">
+          <div class="sv-title">String Viewer</div>
+          <div class="sv-actions">
+            <button data-mode="plain" class="sv-btn">Plain</button>
+            <button data-mode="json" class="sv-btn">JSON</button>
+            <button data-mode="md" class="sv-btn">Markdown</button>
+            <button id="sv-close" class="sv-btn">✕</button>
+          </div>
+        </div>
+        <pre id="sv-pre" class="sv-pre" style="display:none"></pre>
+        <div id="sv-dynamic" class="sv-body"></div>
+      `;
+      viewer.style.marginTop = '10px';
+      viewer.style.borderTop = '1px solid var(--vscode-editorWidget-border)';
+      contentEl.appendChild(viewer);
+
+      // Use event delegation for robustness: a single handler covers all buttons.
+      viewer.addEventListener('click', (ev) => {
+        const target = /** @type {HTMLElement} */ (ev.target);
+
+        const btn = target.closest ? target.closest('.sv-btn') : null;
+        if (!btn) return;
+        if (btn.id === 'sv-close') { viewer.remove(); return; }
+        const mode = btn.getAttribute('data-mode');
+        if (!mode) return;
+        viewer.querySelectorAll('.sv-btn').forEach(x => x.classList.remove('sv-active'));
+        btn.classList.add('sv-active');
+        renderStringMode(viewer.__currentValue, mode);
+      });
+    }
+
+    // update current value and render
+    viewer.__currentValue = value;
+    const detectedMode = detectStringMode(viewer.__currentValue);
+    const activeBtn = viewer.querySelector(`.sv-btn[data-mode="${detectedMode}"]`) || viewer.querySelector('.sv-btn[data-mode="plain"]');
+    viewer.querySelectorAll('.sv-btn').forEach(x => x.classList.remove('sv-active'));
+    activeBtn.classList.add('sv-active');
+    renderStringMode(viewer.__currentValue, detectedMode);
+    viewer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  /** Strip outer C# debug quotes and unescape escape sequences. */
+  function csharpUnquote(s) {
+    const t = s.trim();
+    if (t.startsWith('"') && t.endsWith('"') && t.length >= 2) {
+      return t.slice(1, -1)
+        .replace(/\\r\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+    return t;
+  }
+
+  function detectStringMode(s) {
+    if (!s || s === '') return 'plain';
+    // Normalize C# outer-quoted value before detection
+    const v = csharpUnquote(s);
+    // JSON detection
+    try { JSON.parse(v); return 'json'; } catch {}
+    // basic markdown detection
+    if (/^\s{0,3}#|\n-{3,}|\*\*|\* |\-|\[.*\]\(.+\)/.test(v)) return 'md';
+    return 'plain';
+  }
+
+  /**
+   * Render string content in the chosen mode.
+   * #sv-pre and #sv-dynamic are siblings: we never nuke sv-pre with innerHTML.
+   */
+  function renderStringMode(s, mode) {
+    const svPre     = document.getElementById('sv-pre');
+    const svDynamic = document.getElementById('sv-dynamic');
+    if (!svPre || !svDynamic) return;
+
+    svPre.style.whiteSpace = 'pre-wrap';
+    svPre.style.padding    = '8px';
+
+    if (mode === 'plain') {
+      svDynamic.innerHTML   = '';
+      svPre.textContent     = s;
+      svPre.style.display   = 'block';
+
+    } else if (mode === 'json') {
+      svDynamic.innerHTML = '';
+      try {
+        // C# debugger wraps string values in outer quotes with escape sequences
+        // (e.g. "{\r\n \"name\": ...}"). JSON.parse would return that as a JS
+        // string rather than an object. If the first parse yields a string,
+        // try parsing the inner value again to get the actual object.
+        let parsed = JSON.parse(s);
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch { /* keep as string */ }
+        }
+        svPre.textContent = JSON.stringify(parsed, null, 2);
+      } catch {
+        svPre.textContent = 'Invalid JSON\n\n' + s;
+      }
+      svPre.style.display = 'block';
+
+    } else if (mode === 'md') {
+      svPre.style.display = 'none';
+      try {
+        const src = csharpUnquote(s);
+        const mdRenderer = (typeof markdownit === 'function') ? markdownit() : null;
+        const html = mdRenderer ? mdRenderer.render(src) : escHtml(src).replace(/\n/g, '<br/>');
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html;
+        wrapper.querySelectorAll('script').forEach(n => n.remove());
+        wrapper.querySelectorAll('[onclick]').forEach(n => n.removeAttribute('onclick'));
+        wrapper.querySelectorAll('a').forEach(a => {
+          if (/^javascript:/i.test(a.getAttribute('href') || '')) { a.removeAttribute('href'); }
+          a.setAttribute('rel', 'noreferrer noopener');
+          a.setAttribute('target', '_blank');
+        });
+        const preview = document.createElement('div');
+        preview.className = 'md-preview';
+        preview.appendChild(wrapper);
+        svDynamic.innerHTML = '';
+        svDynamic.appendChild(preview);
+      } catch {
+        svDynamic.innerHTML = '<pre style="white-space:pre-wrap;padding:8px">' + escHtml(s) + '</pre>';
+      }
+
+    }
+  }
 
   /** @param {string} s @returns {string} */
   function escHtml(s) {

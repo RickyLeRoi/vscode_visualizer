@@ -24,13 +24,13 @@ export class DebugInspector {
   private readonly maxRows: number;
   private readonly maxItems: number;
 
-  constructor(session: vscode.DebugSession, frameId?: number) {
+  constructor(session: vscode.DebugSession, frameId?: number, overrides?: { maxRows?: number; maxItems?: number }) {
     this.session = session;
     this.frameId = frameId;
 
     const cfg = vscode.workspace.getConfiguration('dotnetVisualizer');
-    this.maxRows = cfg.get<number>('maxRows', 50);
-    this.maxItems = cfg.get<number>('maxItems', 200);
+    this.maxRows = overrides?.maxRows ?? cfg.get<number>('maxRows', 50);
+    this.maxItems = overrides?.maxItems ?? cfg.get<number>('maxItems', 200);
   }
 
   // ─── Public entry point ─────────────────────────────────────────────────────

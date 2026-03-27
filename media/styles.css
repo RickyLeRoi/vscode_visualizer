@@ -210,6 +210,18 @@ body {
   font-style: italic;
 }
 
+.open-value-btn {
+  margin-left: 10px;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #e6e6e6);
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.open-value-btn:hover { filter: brightness(.95); }
+
 .type-badge {
   display: inline-block;
   padding: 1px 6px;
@@ -228,3 +240,29 @@ body {
   color: var(--vscode-inputValidation-warningForeground, #e2c08d);
   border-left: 3px solid var(--vscode-inputValidation-warningBorder, #b89500);
 }
+
+/* String viewer */
+#string-viewer { padding: 8px 12px; }
+.sv-header { display:flex; align-items:center; justify-content:space-between; gap:8px }
+.sv-title { font-weight:600 }
+.sv-actions { display:flex; gap:6px }
+.sv-btn {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #e6e6e6);
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sv-btn:hover { filter: brightness(1.15); }
+.sv-btn.sv-active {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  color: #fff;
+}
+.sv-pre  { padding: 8px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.sv-body { padding: 6px 0; }
+.md-preview { font-family: var(--vscode-font-family, 'Segoe UI', sans-serif); line-height: 1.5; padding: 4px 8px; }
+.md-preview p { margin: 0.4em 0; }
