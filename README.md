@@ -25,13 +25,29 @@ All views support **real-time text filtering**, **column sorting**, **CSV export
 
 ## Usage
 
-### Method 1 — Variables panel (recommended)
+There are four ways to open the visualizer:
+
+### Method 1 — Editor selection + right-click (recommended)
+
+1. Start a C# debug session and pause on a breakpoint.
+2. In the editor, **select** a variable name or C# expression.
+3. Right-click → **"Visualize with .NET Visualizer"**.
+
+### Method 2 — Keyboard shortcut
+
+1. Start a C# debug session and pause on a breakpoint.
+2. In the editor, select a variable name or place the cursor on it.
+3. Press **`Ctrl+Alt+V`** (Mac: `Cmd+Alt+V`).
+
+> If nothing is selected, the word under the cursor is used automatically.
+
+### Method 3 — Variables panel
 
 1. Start a C# debug session and pause on a breakpoint.
 2. In the **Variables** panel, right-click any variable.
 3. Choose **"Visualize with .NET Visualizer"**.
 
-### Method 2 — Command Palette
+### Method 4 — Command Palette
 
 1. Start a C# debug session and pause on a breakpoint.
 2. Open the Command Palette (`Ctrl+Shift+P`).

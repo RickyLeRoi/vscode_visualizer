@@ -46,6 +46,19 @@
         "command": "dotnetVisualizer.visualizeFromVariables",
         "title": "Visualize with .NET Visualizer",
         "icon": "$(table)"
+      },
+      {
+        "command": "dotnetVisualizer.visualizeSelection",
+        "title": "Visualize with .NET Visualizer",
+        "icon": "$(table)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "dotnetVisualizer.visualizeSelection",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v",
+        "when": "editorTextFocus && inDebugMode"
       }
     ],
     "menus": {
@@ -54,6 +67,13 @@
           "command": "dotnetVisualizer.visualizeFromVariables",
           "when": "debugType == 'coreclr' || debugType == 'clr'",
           "group": "z_dotnetvisualizer@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dotnetVisualizer.visualizeSelection",
+          "when": "editorTextFocus && inDebugMode && (debugType == 'coreclr' || debugType == 'clr')",
+          "group": "navigation@-1"
         }
       ]
     },

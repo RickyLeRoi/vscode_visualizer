@@ -29,6 +29,42 @@ export function activate(context: vscode.ExtensionContext): void {
     )
   );
 
+  // ── Command: editor selection → right-click or Ctrl+Alt+V ─────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dotnetVisualizer.visualizeSelection', async () => {
+      const session = vscode.debug.activeDebugSession;
+      if (!session) {
+        vscode.window.showErrorMessage(
+          '.NET Visualizer: start a debug session and pause on a breakpoint first.'
+        );
+        return;
+      }
+
+      const editor = vscode.window.activeTextEditor;
+      const selection = editor?.selection;
+      let expression = editor && selection && !selection.isEmpty
+        ? editor.document.getText(selection).trim()
+        : undefined;
+
+      // If nothing is selected, fall back to the word under the cursor
+      if (!expression && editor) {
+        const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active);
+        if (wordRange) {
+          expression = editor.document.getText(wordRange).trim();
+        }
+      }
+
+      if (!expression) {
+        vscode.window.showErrorMessage(
+          '.NET Visualizer: select a variable name or expression in the editor first.'
+        );
+        return;
+      }
+
+      await runVisualization(context, session, expression);
+    })
+  );
+
   // ── Command: Command Palette → ask for expression ──────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand('dotnetVisualizer.visualize', async () => {
