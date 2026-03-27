@@ -22,6 +22,10 @@ export interface DataTableData {
   rows: string[][];
   totalRows: number;
   truncated: boolean;
+  // Pagination metadata
+  pageSize?: number;
+  currentPage?: number;
+  offset?: number;
 }
 
 // ─── DataSet ──────────────────────────────────────────────────────────────────
@@ -45,6 +49,10 @@ export interface ListData {
   items: ItemData[];
   totalCount: number;
   truncated: boolean;
+  // Pagination metadata
+  pageSize?: number;
+  currentPage?: number;
+  offset?: number;
 }
 
 // ─── Dictionary ───────────────────────────────────────────────────────────────
@@ -56,6 +64,10 @@ export interface EntryData {
 
 export interface DictionaryData {
   kind: 'dictionary';
+  // Pagination metadata
+  pageSize?: number;
+  currentPage?: number;
+  offset?: number;
   typeName: string;
   entries: EntryData[];
   totalCount: number;

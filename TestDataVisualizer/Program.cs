@@ -275,7 +275,10 @@ for (int row = 1; row <= 550; row++)
     object[] values = new object[105];
     for (int col = 0; col < 105; col++)
     {
-        values[col] = $"R{row:D4}_C{col + 1:D3}_{Guid.NewGuid().ToString().Substring(0, 8)}";
+        if (col != 0 && row / col == 1)
+            values[col] = null;
+        else
+            values[col] = $"R{row:D4}_C{col + 1:D3}_{Guid.NewGuid().ToString().Substring(0, 8)}";
     }
     largeTable.Rows.Add(values);
 }

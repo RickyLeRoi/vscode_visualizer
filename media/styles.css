@@ -241,6 +241,22 @@ body {
   border-left: 3px solid var(--vscode-inputValidation-warningBorder, #b89500);
 }
 
+/* ── Pagination controls ────────────────────────────────────────────────────── */
+.pagination-controls {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  margin-top: 12px;
+  background: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-list-focusBorder);
+  font-size: 12px;
+  z-index: 10;
+}
+
 /* String viewer */
 #string-viewer { padding: 8px 12px; }
 .sv-header { display:flex; align-items:center; justify-content:space-between; gap:8px }

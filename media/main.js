@@ -13,6 +13,7 @@
   let sortCol = -1;
   let sortAsc = true;
   let filterText = '';
+  let currentPage = 1;  // Current page for pagination
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
 
@@ -34,11 +35,90 @@
       currentData = msg.data;
       // Store expression if provided by the host
       currentData.__expression = msg.data.__expression || msg.data.expression || currentData.__expression;
+      // Use the page number from the data if provided, otherwise set to 1
+      currentPage = msg.data.currentPage || 1;
       activeTableIndex = 0;
       sortCol = -1;
       sortAsc = true;
       filterText = searchInput.value = '';
       render();
+    } else if (msg.command === 'row-update') {
+      // Progressive row update: populate the row in the currently displayed table
+      const now = new Date().toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+      console.log(`[${now}] row-update: row ${msg.rowIndex}, data length ${msg.rowData?.length || 0}`);
+      
+      if (currentData?.kind === 'datatable') {
+        const tbody = contentEl.querySelector('table.data-table tbody');
+        if (tbody) {
+          let row = tbody.rows[msg.rowIndex];
+          
+          // If row doesn't exist yet, create it
+          if (!row) {
+            console.log(`[${now}] Creating row ${msg.rowIndex} (previously didn't exist)`);
+            row = tbody.insertRow();
+            // Add row number cell
+            const numTd = row.insertCell();
+            numTd.className = 'row-num';
+            numTd.textContent = String(msg.rowIndex + 1);
+            // Add empty cells for each column
+            for (let i = 0; i < currentData.columns.length; i++) {
+              row.insertCell();
+            }
+          }
+          
+          // Update cells (skip first cell which is row number)
+          if (msg.rowData && msg.rowData.length > 0) {
+            for (let i = 0; i < msg.rowData.length && i + 1 < row.cells.length; i++) {
+              const cell = row.cells[i + 1];
+              const value = msg.rowData[i] == null ? '(null)' : String(msg.rowData[i]);
+              cell.textContent = value;
+              cell.title = value;
+              if (value === '(null)') {
+                cell.className = 'null-value';
+              } else {
+                cell.className = 'cell-value';
+              }
+            }
+            console.log(`[${now}] Row ${msg.rowIndex} populated`);
+          }
+        }
+      } else if (currentData?.kind === 'dataset') {
+        // For datasets, need to find the active table
+        const tbody = contentEl.querySelector('table.data-table tbody');
+        if (tbody) {
+          let row = tbody.rows[msg.rowIndex];
+          
+          // If row doesn't exist yet, create it
+          if (!row) {
+            console.log(`[${now}] Creating row ${msg.rowIndex} (previously didn't exist)`);
+            row = tbody.insertRow();
+            // Add row number cell
+            const numTd = row.insertCell();
+            numTd.className = 'row-num';
+            numTd.textContent = String(msg.rowIndex + 1);
+            // Add empty cells for each column
+            for (let i = 0; i < currentData.tables[activeTableIndex].columns.length; i++) {
+              row.insertCell();
+            }
+          }
+          
+          // Update cells (skip first cell which is row number)
+          if (msg.rowData && msg.rowData.length > 0) {
+            for (let i = 0; i < msg.rowData.length && i + 1 < row.cells.length; i++) {
+              const cell = row.cells[i + 1];
+              const value = msg.rowData[i];
+              cell.textContent = value;
+              cell.title = value;
+              if (value === '(null)') {
+                cell.className = 'null-value';
+              } else {
+                cell.className = 'cell-value';
+              }
+            }
+            console.log(`[${now}] Row ${msg.rowIndex} populated`);
+          }
+        }
+      }
     } else if (msg.command === 'rerender') {
       // Panel became visible again — re-apply button state based on currentData
       render();
@@ -98,6 +178,17 @@
     }
   });
 
+  // ── Cell Click Delegation ──────────────────────────────────────────────────
+  // Uses event delegation to handle clicks on ALL cell-value elements
+  // instead of adding individual listeners for each cell (performance boost!)
+  contentEl.addEventListener('click', (event) => {
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (target.classList.contains('cell-value')) {
+      const value = target.textContent || '';
+      openStringViewer(value);
+    }
+  });
+
   // ── State-aware UI reset ──────────────────────────────────────────────────
 
   function clearUI(isWaiting = true) {
@@ -138,15 +229,7 @@
     switch (currentData.kind) {
       case 'datatable':
         renderDataTable(currentData);
-        // Show "Show More" when data is truncated
-        if (btnShowMore && currentData.truncated) {
-          btnShowMore.style.display = 'inline-block';
-          btnShowMore.onclick = () => {
-            if (currentData.__expression) {
-              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
-            }
-          };
-        }
+        // Pagination is now built-in to renderDataTable, no need for Show More button
         break;
       case 'dataset':
         renderDataSet(currentData);
@@ -154,25 +237,11 @@
       case 'list':
       case 'array':
         renderList(currentData);
-        if (btnShowMore && currentData.truncated) {
-          btnShowMore.style.display = 'inline-block';
-          btnShowMore.onclick = () => {
-            if (currentData.__expression) {
-              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
-            }
-          };
-        }
+        // Pagination is now built-in to renderList, no need for Show More button
         break;
       case 'dictionary':
         renderDictionary(currentData);
-        if (btnShowMore && currentData.truncated) {
-          btnShowMore.style.display = 'inline-block';
-          btnShowMore.onclick = () => {
-            if (currentData.__expression) {
-              vscode.postMessage({ command: 'requestMore', expression: currentData.__expression });
-            }
-          };
-        }
+        // Pagination is now built-in to renderDictionary, no need for Show More button
         break;
       default:
         renderUnknown(currentData);
@@ -187,6 +256,64 @@
   // ── DataTable ──────────────────────────────────────────────────────────────
 
   /**
+   * Create pagination controls HTML for DataTable
+   * @param {number} totalRows
+   * @param {number} pageSize
+   * @param {number} currentPage
+   * @returns {HTMLElement}
+   */
+  function createPaginationControls(totalRows, pageSize, currentPage) {
+    const totalPages = Math.ceil(totalRows / pageSize);
+    const paginationDiv = document.createElement('div');
+    paginationDiv.className = 'pagination-controls';
+
+    // Previous button
+    const btnPrev = document.createElement('button');
+    btnPrev.textContent = '< Prev';
+    btnPrev.className = 'btn';
+    btnPrev.disabled = currentPage <= 1;
+    btnPrev.onclick = () => {
+      if (currentPage > 1) goToPage(currentPage - 1);
+    };
+    paginationDiv.appendChild(btnPrev);
+
+    // Page numbers
+    const pageInfoDiv = document.createElement('span');
+    pageInfoDiv.textContent = `Page ${currentPage} of ${totalPages}`;
+    pageInfoDiv.style.cssText = 'flex: 1; text-align: center; user-select: none;';
+    paginationDiv.appendChild(pageInfoDiv);
+
+    // Next button
+    const btnNext = document.createElement('button');
+    btnNext.textContent = 'Next >';
+    btnNext.className = 'btn';
+    btnNext.disabled = currentPage >= totalPages;
+    btnNext.onclick = () => {
+      if (currentPage < totalPages) goToPage(currentPage + 1);
+    };
+    paginationDiv.appendChild(btnNext);
+
+    return paginationDiv;
+  }
+
+  /**
+   * Navigate to a specific page
+   * @param {number} pageNum
+   */
+  function goToPage(pageNum) {
+    if (!currentData || !currentData.__expression) return;
+    const pageSize = currentData.pageSize || 50;
+    vscode.postMessage({
+      command: 'changePage',
+      expression: currentData.__expression,
+      pageNum,
+      pageSize,
+    });
+  }
+
+  // ── DataTable ──────────────────────────────────────────────────────────────
+
+  /**
    * @param {{ kind: string, tableName: string, columns: {name:string,typeName:string}[], rows: string[][], totalRows: number, truncated: boolean }} dt
    */
   function renderDataTable(dt) {
@@ -194,9 +321,6 @@
     titleEl.innerHTML = `${escHtml(dt.tableName)} <span class="type-badge">${shortType}</span>`;
 
     contentEl.innerHTML = '';
-    if (dt.truncated) {
-      contentEl.appendChild(truncWarning(dt.totalRows, dt.rows.length));
-    }
 
     if (dt.columns.length === 0) {
       contentEl.insertAdjacentHTML('beforeend', '<p class="empty-msg">No columns.</p>');
@@ -246,7 +370,9 @@
       const tr = tbody.insertRow();
       const numTd = tr.insertCell();
       numTd.className = 'row-num';
-      numTd.textContent = String(rowIdx + 1);
+      // Row number should account for pagination offset
+      const displayRowNum = (currentPage - 1) * (dt.pageSize || 50) + rowIdx + 1;
+      numTd.textContent = String(displayRowNum);
 
       row.forEach(cell => {
         const td = tr.insertCell();
@@ -257,12 +383,20 @@
           td.className = 'cell-value';
           td.textContent = cell;
           td.title = cell;
-          td.addEventListener('click', () => openStringViewer(cell));
         }
       });
     });
 
     contentEl.appendChild(table);
+
+    // Add pagination controls if there are multiple pages
+    const pageSize = dt.pageSize || 50;
+    const totalPages = Math.ceil(dt.totalRows / pageSize);
+    if (totalPages > 1) {
+      const paginationControls = createPaginationControls(dt.totalRows, pageSize, currentPage);
+      contentEl.appendChild(paginationControls);
+    }
+
     setStatus(
       filterText
         ? `Showing ${rows.length} of ${dt.totalRows} rows (filtered)`
@@ -316,9 +450,6 @@
     titleEl.innerHTML = `<span class="type-badge">${badge}</span> <small>${escHtml(lst.typeName)}</small>`;
 
     contentEl.innerHTML = '';
-    if (lst.truncated) {
-      contentEl.appendChild(truncWarning(lst.totalCount, lst.items.length));
-    }
 
     let items = lst.items;
     if (filterText) {
@@ -338,19 +469,31 @@
     });
 
     const tbody = table.createTBody();
-    items.forEach(it => {
+    items.forEach((it, itemIdx) => {
       const tr = tbody.insertRow();
-      const td0 = tr.insertCell(); td0.textContent = String(it.index); td0.className = 'row-num';
+      const td0 = tr.insertCell();
+      // Item index should account for pagination offset
+      const displayIndex = (currentPage - 1) * (lst.pageSize || 50) + itemIdx;
+      td0.textContent = String(displayIndex);
+      td0.className = 'row-num';
       const td1 = tr.insertCell();
       if (it.value === '(null)') { td1.className = 'null-value'; td1.textContent = 'null'; }
       else {
         td1.className = 'cell-value';
         td1.textContent = it.value; td1.title = it.value;
-        td1.addEventListener('click', () => openStringViewer(it.value));
       }
     });
 
     contentEl.appendChild(table);
+
+    // Add pagination controls if there are multiple pages
+    const pageSize = lst.pageSize || 50;
+    const totalPages = Math.ceil(lst.totalCount / pageSize);
+    if (totalPages > 1) {
+      const paginationControls = createPaginationControls(lst.totalCount, pageSize, currentPage);
+      contentEl.appendChild(paginationControls);
+    }
+
     setStatus(
       filterText
         ? `Showing ${items.length} of ${lst.totalCount} items (filtered)`
@@ -367,9 +510,6 @@
     titleEl.innerHTML = `<span class="type-badge">Dictionary</span> <small>${escHtml(dict.typeName)}</small>`;
 
     contentEl.innerHTML = '';
-    if (dict.truncated) {
-      contentEl.appendChild(truncWarning(dict.totalCount, dict.entries.length));
-    }
 
     let entries = dict.entries;
     if (filterText) {
@@ -393,20 +533,19 @@
       const tk = tr.insertCell(); tk.textContent = e.key; tk.title = e.key;
       const tv = tr.insertCell();
       if (e.value === '(null)') { tv.className = 'null-value'; tv.textContent = 'null'; }
-      else { tv.textContent = e.value; tv.title = e.value; }
-    });
-
-    // make values clickable
-    tbody.querySelectorAll('td').forEach(td => {
-      if (td.classList.contains('null-value')) return;
-      if (td.cellIndex === 1) {
-        const v = td.textContent || '';
-        td.classList.add('cell-value');
-        td.addEventListener('click', () => openStringViewer(v));
-      }
+      else { tv.className = 'cell-value'; tv.textContent = e.value; tv.title = e.value; }
     });
 
     contentEl.appendChild(table);
+
+    // Add pagination controls if there are multiple pages
+    const pageSize = dict.pageSize || 50;
+    const totalPages = Math.ceil(dict.totalCount / pageSize);
+    if (totalPages > 1) {
+      const paginationControls = createPaginationControls(dict.totalCount, pageSize, currentPage);
+      contentEl.appendChild(paginationControls);
+    }
+
     setStatus(
       filterText
         ? `Showing ${entries.length} of ${dict.totalCount} entries (filtered)`
@@ -452,18 +591,8 @@
       const tn = tr.insertCell(); tn.className = 'prop-name'; tn.textContent = p.name;
       const tv = tr.insertCell();
       if (p.value === '(null)') { tv.className = 'null-value'; tv.textContent = 'null'; }
-      else { tv.textContent = p.value; tv.title = p.value; }
+      else { tv.className = 'cell-value'; tv.textContent = p.value; tv.title = p.value; }
       const tt = tr.insertCell(); tt.className = 'prop-type'; tt.textContent = p.typeName || '';
-    });
-
-    // make property values clickable
-    tbody.querySelectorAll('td').forEach(td => {
-      if (td.classList.contains('null-value')) return;
-      if (td.classList.contains('prop-type')) return;
-      if (td.classList.contains('prop-name')) return;
-      const v = td.textContent || '';
-      td.classList.add('cell-value');
-      td.addEventListener('click', () => openStringViewer(v));
     });
 
     contentEl.appendChild(table);

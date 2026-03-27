@@ -30,19 +30,29 @@ export class DebugInspector {
   private readonly frameId: number | undefined;
   private readonly maxRows: number;
   private readonly maxItems: number;
+  private readonly offset: number;
 
-  constructor(session: vscode.DebugSession, frameId?: number, overrides?: { maxRows?: number; maxItems?: number }) {
+  constructor(
+    session: vscode.DebugSession,
+    frameId?: number,
+    overrides?: { maxRows?: number; maxItems?: number; offset?: number; pageNum?: number }
+  ) {
     this.session = session;
     this.frameId = frameId;
 
     const cfg = vscode.workspace.getConfiguration('dotnetVisualizer');
     this.maxRows = overrides?.maxRows ?? cfg.get<number>('maxRows', 100);
     this.maxItems = overrides?.maxItems ?? cfg.get<number>('maxItems', 100);
+    this.offset = overrides?.offset ?? 0;
   }
 
   // ─── Public entry point ─────────────────────────────────────────────────────
 
-  async inspect(expression: string): Promise<VisualizerData> {
+  async inspect(
+    expression: string,
+    onReady?: (skeleton: VisualizerData) => void | Promise<void>,
+    onRowFetch?: (rowIndex: number, rowData: string[]) => void | Promise<void>
+  ): Promise<VisualizerData> {
     // Use 'hover' context for type detection: it is a lightweight read-only eval
     // that does NOT invoke the full Roslyn compilation pipeline, avoiding CS0433
     // (IDictionaryDebugView<K,V> ambiguity between System.Collections and
@@ -52,10 +62,10 @@ export class DebugInspector {
     const resultStr = evalResult.result ?? '';
 
     if (this.matchesDataSet(typeName, resultStr)) {
-      return this.extractDataSet(expression);
+      return this.extractDataSet(expression, onReady, onRowFetch);
     }
     if (this.matchesDataTable(typeName, resultStr)) {
-      return this.extractDataTable(expression);
+      return this.extractDataTable(expression, onReady, onRowFetch);
     }
     if (this.matchesDictionary(typeName, resultStr)) {
       return this.extractDictionary(expression, evalResult.type ?? 'Dictionary', evalResult.variablesReference);
@@ -132,7 +142,129 @@ export class DebugInspector {
 
   // ─── DataTable extractor ────────────────────────────────────────────────────
 
-  async extractDataTable(expr: string): Promise<DataTableData> {
+  async extractDataTable(expr: string, onReady?: (skeleton: VisualizerData) => void | Promise<void>, onRowFetch?: (rowIndex: number, rowData: string[]) => void | Promise<void>): Promise<DataTableData> {
+    // Try fast JSON serialization first
+    const jsonData = await this.extractDataTableViaJSON(expr, onReady, onRowFetch);
+    if (jsonData) return jsonData;
+
+    // Fallback to slow cell-by-cell extraction
+    return this.extractDataTableSlow(expr, onReady, onRowFetch);
+  }
+
+  private async extractDataTableViaJSON(expr: string, onReady?: (skeleton: VisualizerData) => void | Promise<void>, onRowFetch?: (rowIndex: number, rowData: string[]) => void | Promise<void>): Promise<DataTableData | null> {
+    try {
+      const tableName = await this.safeEvalString(`${expr}.TableName`);
+      const totalRows = await this.safeEvalInt(`${expr}.Rows.Count`);
+      const fetchCount = Math.min(totalRows, this.maxRows);
+      const colCount = await this.safeEvalInt(`${expr}.Columns.Count`);
+
+      // Get column info
+      const columns: ColumnInfo[] = [];
+      for (let i = 0; i < colCount; i++) {
+        const name = await this.safeEvalString(`${expr}.Columns[${i}].ColumnName`, `Col${i}`);
+        const typeName = await this.safeEvalString(`${expr}.Columns[${i}].DataType.Name`, 'object');
+        columns.push({ name, typeName });
+      }
+
+      // Send skeleton immediately
+      if (onReady) {
+        const skeleton: DataTableData = {
+          kind: 'datatable',
+          tableName: tableName || 'DataTable',
+          columns,
+          rows: [],
+          totalRows,
+          truncated: totalRows > this.maxRows,
+        };
+        await onReady(skeleton);
+      }
+
+      // Request rows as JSON array: [["val1", "val2"], ["val3", "val4"], ...]
+      // With pagination support using offset
+      const jsonRowsExpr = `
+        string.Join("\\n", 
+          Enumerable.Range(${this.offset}, Math.Min(${fetchCount}, Math.Max(0, ${expr}.Rows.Count - ${this.offset})))
+            .Select(r => 
+              "[" + string.Join(",", 
+                Enumerable.Range(0, ${expr}.Columns.Count)
+                  .Select(c => 
+                    "\\\"" + (${expr}.Rows[r][c]?.ToString() ?? "").Replace("\\\\", "\\\\\\\\").Replace("\\\"", "\\\\\\\"").Replace("\\n", "\\\\n").Replace("\\r", "\\\\r") + "\\\""
+                  )
+              ) + "]"
+            )
+        )
+      `;
+
+      const now = new Date();
+      const ms = String(now.getMilliseconds()).padStart(3, '0');
+      const timeStr = now.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      console.error(`[${timeStr}.${ms}] Requesting all ${fetchCount} rows as JSON from DAP...`);
+
+      const jsonRowsStr = await this.safeEvalString(jsonRowsExpr, '');
+      if (!jsonRowsStr) {
+        console.error(`[${timeStr}.${ms}] JSON rows expr returned empty`);
+        return null;
+      }
+
+      const now2 = new Date();
+      const ms2 = String(now2.getMilliseconds()).padStart(3, '0');
+      const timeStr2 = now2.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      console.error(`[${timeStr2}.${ms2}] Received JSON rows (${jsonRowsStr.length} chars), parsing...`);
+
+      // Debug: check what separators we actually have
+      const hasRealNewlines = jsonRowsStr.includes('\n');
+      const hasEscapedNewlines = jsonRowsStr.includes('\\n');
+      console.error(`[${timeStr2}.${ms2}] Has real newlines: ${hasRealNewlines}, Has escaped newlines (backslash-n): ${hasEscapedNewlines}`);
+      if (hasEscapedNewlines && !hasRealNewlines) {
+        console.error(`[${timeStr2}.${ms2}] WARNING: Rows appear to be separated by escaped newlines (\\n), not real newlines!`);
+      }
+
+      // Parse JSON lines and notify for each row
+      const rows: string[][] = [];
+      // Try to split by real newlines first, then by escaped newlines if needed
+      let lines = jsonRowsStr.split('\n').filter((l: string) => l.trim());
+      if (lines.length <= 1) {
+        // If split by \n didn't work, try splitting by escaped newlines
+        lines = jsonRowsStr.split('\\n').filter((l: string) => l.trim());
+        console.error(`[${timeStr2}.${ms2}] Retried split with escaped newlines, got ${lines.length} rows`);
+      } else {
+        console.error(`[${timeStr2}.${ms2}] Split by real newlines, got ${lines.length} rows`);
+      }
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          const row = JSON.parse(lines[i]) as string[];
+          rows.push(row);
+          if (onRowFetch) {
+            await onRowFetch(i, row);
+          }
+        } catch (e) {
+          console.error(`[${timeStr2}.${ms2}] Failed to parse row ${i}: ${lines[i]}`);
+          rows.push(new Array(colCount).fill('(error)'));
+        }
+      }
+
+      const now3 = new Date();
+      const ms3 = String(now3.getMilliseconds()).padStart(3, '0');
+      const timeStr3 = now3.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      console.error(`[${timeStr3}.${ms3}] Parsed ${rows.length} rows successfully`);
+
+      return {
+        kind: 'datatable',
+        tableName: tableName || 'DataTable',
+        columns,
+        rows,
+        totalRows,
+        truncated: totalRows > this.maxRows,
+        pageSize: this.maxRows,
+        offset: this.offset,
+      };
+    } catch (err) {
+      console.error(`[extractDataTableViaJSON] Error: ${err}`);
+      return null;
+    }
+  }
+
+  private async extractDataTableSlow(expr: string, onReady?: (skeleton: VisualizerData) => void | Promise<void>, onRowFetch?: (rowIndex: number, rowData: string[]) => void | Promise<void>): Promise<DataTableData> {
     const tableName = await this.safeEvalString(`${expr}.TableName`);
     const colCount = await this.safeEvalInt(`${expr}.Columns.Count`);
 
@@ -147,17 +279,43 @@ export class DebugInspector {
     const fetchCount = Math.min(totalRows, this.maxRows);
     const truncated = totalRows > this.maxRows;
 
+    // Send skeleton immediately so webview can show structure before fetching data
+    if (onReady) {
+      const skeleton: DataTableData = {
+        kind: 'datatable',
+        tableName: tableName || 'DataTable',
+        columns,
+        rows: [], // empty for now
+        totalRows,
+        truncated,
+      };
+      await onReady(skeleton);
+    }
+
     const rows: string[][] = [];
+    // Evaluate all cells in parallel per row instead of sequentially
     for (let r = 0; r < fetchCount; r++) {
-      const row: string[] = [];
+      const cellPromises = [];
       for (let c = 0; c < colCount; c++) {
-        const cell = await this.safeEvalString(
-          `${expr}.Rows[${r}][${c}] == null ? "(null)" : ${expr}.Rows[${r}][${c}].ToString()`,
-          '(error)'
+        cellPromises.push(
+          this.safeEvalString(
+            // `${expr}.Rows[${r}][${c}] == null ? "(null)" : ${expr}.Rows[${r}][${c}].ToString()`,
+            `${expr}.Rows[${r}][${c}]`,
+            '(error)'
+          )
         );
-        row.push(cell);
       }
+      const row = await Promise.all(cellPromises);
       rows.push(row);
+      // Log row completion with timestamp
+      const now = new Date();
+      const ms = String(now.getMilliseconds()).padStart(3, '0');
+      const timeStr = now.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      console.error(`[${timeStr}.${ms}] Row ${r} fetched (${colCount} cells)`);
+      // Notify immediately after fetching this row
+      if (onRowFetch) {
+        await onRowFetch(r, row);
+      }
     }
 
     return {
@@ -172,14 +330,14 @@ export class DebugInspector {
 
   // ─── DataSet extractor ──────────────────────────────────────────────────────
 
-  async extractDataSet(expr: string): Promise<DataSetData> {
+  async extractDataSet(expr: string, onReady?: (skeleton: VisualizerData) => void | Promise<void>, onRowFetch?: (rowIndex: number, rowData: string[]) => void | Promise<void>): Promise<DataSetData> {
     const dataSetName = await this.safeEvalString(`${expr}.DataSetName`);
     const tableCount = await this.safeEvalInt(`${expr}.Tables.Count`);
 
     const tables: DataTableData[] = [];
     for (let i = 0; i < tableCount; i++) {
       try {
-        const tbl = await this.extractDataTable(`${expr}.Tables[${i}]`);
+        const tbl = await this.extractDataTable(`${expr}.Tables[${i}]`, onReady, onRowFetch);
         tables.push(tbl);
       } catch {
         // skip failed table

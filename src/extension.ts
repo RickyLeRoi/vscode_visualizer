@@ -2,6 +2,49 @@ import * as vscode from 'vscode';
 import { DebugInspector } from './debugInspector';
 import { VisualizerView } from './visualizerView';
 
+// ── Cache system for pagination ────────────────────────────────────────────────
+// Cache structure: Map<expression, { pageSize, totalCount, pages: Map<pageNum, rowArray> }>
+interface CachedPage {
+  pagnum: number;
+  rows: string[][];
+}
+
+interface CacheEntry {
+  pageSize: number;
+  totalCount: number;
+  pages: Map<number, string[][]>;
+  metadata: any;
+}
+
+const dataCache = new Map<string, CacheEntry>();
+
+function getCacheKey(expression: string, options?: { maxRows?: number; maxItems?: number }): string {
+  // Include maxRows/maxItems in cache key so different configs don't conflict
+  const max = options?.maxRows || options?.maxItems || 50;
+  return `${expression}@${max}`;
+}
+
+function getCachedPage(expression: string, pageNum: number, options?: { maxRows?: number; maxItems?: number }): string[][] | undefined {
+  const key = getCacheKey(expression, options);
+  return dataCache.get(key)?.pages.get(pageNum);
+}
+
+function cachePageData(expression: string, pageNum: number, rows: string[][], metadata: any, options?: { maxRows?: number; maxItems?: number }): void {
+  const key = getCacheKey(expression, options);
+  const pageSize = options?.maxRows || 50;
+  
+  if (!dataCache.has(key)) {
+    dataCache.set(key, {
+      pageSize,
+      totalCount: metadata.totalCount || 0,
+      pages: new Map(),
+      metadata,
+    });
+  }
+  
+  dataCache.get(key)!.pages.set(pageNum, rows);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   // ── Register persistent sidebar panel ─────────────────────────────────────
   const visualizerView = new VisualizerView(context.extensionUri);
@@ -185,15 +228,77 @@ export function activate(context: vscode.ExtensionContext): void {
       await runVisualization(context, session, expr, bigger);
     })
   );
+
+  // Register command to navigate between pages (invoked by webview pagination controls)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'dotnetVisualizer.changePage',
+      async (expr: string, pageNum: number, pageSize?: number) => {
+        const session = vscode.debug.activeDebugSession;
+        if (!session) {
+          vscode.window.showErrorMessage('.NET Visualizer: no active debug session.');
+          return;
+        }
+        await navigateToPage(context, session, expr, pageNum, pageSize);
+      }
+    )
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Navigate to a specific page, using cache if available.
+ * If the page is not cached, fetch it from the debugger.
+ */
+async function navigateToPage(
+  context: vscode.ExtensionContext,
+  session: vscode.DebugSession,
+  expression: string,
+  pageNum: number,
+  pageSize?: number
+): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('dotnetVisualizer');
+  const defaultPageSize = pageSize || cfg.get<number>('maxRows', 50);
+  const options = { maxRows: defaultPageSize, maxItems: cfg.get<number>('maxItems', 200) };
+
+  // Check if this page is already cached
+  const cachedRows = getCachedPage(expression, pageNum, options);
+  if (cachedRows) {
+    // Serve from cache — instantly
+    const view = VisualizerView.getInstance();
+    const cacheEntry = dataCache.get(getCacheKey(expression, options));
+    const fullData = Object.assign({}, cacheEntry!.metadata, {
+      rows: cachedRows,
+      currentPage: pageNum,
+      pageSize: defaultPageSize,
+      offset: (pageNum - 1) * defaultPageSize,
+      __expression: expression,
+    });
+    await view?.sendData(fullData as any);
+    return;
+  }
+
+  // Not cached — need to fetch it from debugger
+  const offset = (pageNum - 1) * defaultPageSize;
+  await runVisualization(context, session, expression, {
+    maxRows: defaultPageSize,
+    maxItems: options.maxItems,
+    pageNum,
+    offset,
+  });
+}
 
 async function runVisualization(
   context: vscode.ExtensionContext,
   session: vscode.DebugSession,
   expression: string,
-  options?: { maxRows?: number; maxItems?: number }
+  options?: {
+    maxRows?: number;
+    maxItems?: number;
+    pageNum?: number;
+    offset?: number;
+  }
 ): Promise<void> {
   await vscode.window.withProgress(
     {
@@ -205,10 +310,46 @@ async function runVisualization(
       try {
         const frameId = getActiveFrameId();
         const inspector = new DebugInspector(session, frameId, options);
-        const data = await inspector.inspect(expression);
+        const view = VisualizerView.getInstance();
+        
+        // Send skeleton immediately when metadata is ready
+        const onReady = async (skeleton: any) => {
+          const now = new Date();
+          const ms = String(now.getMilliseconds()).padStart(3, '0');
+          const timeStr = now.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          console.log(`[${timeStr}.${ms}] onReady callback: sending skeleton with ${skeleton.columns.length} columns`);
+          const payload = Object.assign({}, skeleton, { __expression: expression });
+          await view?.sendData(payload);
+        };
+        
+        // Progressive callback: send each row as it becomes available
+        const onRowFetch = (rowIndex: number, rowData: string[]) => {
+          const now = new Date();
+          const ms = String(now.getMilliseconds()).padStart(3, '0');
+          const timeStr = now.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          console.log(`[${timeStr}.${ms}] onRowFetch callback: row ${rowIndex}`);
+          view?.sendRowUpdate(rowIndex, rowData);
+        };
+        
+        const data = await inspector.inspect(expression, onReady, onRowFetch);
         // Attach the inspected expression so the webview can request more if needed
         const payload = Object.assign({}, data, { __expression: expression });
-        await VisualizerView.getInstance()?.sendData(payload as any);
+        
+        // Cache the page data for data types that support pagination
+        // Always cache data, even on first load (page 1)
+        if ('rows' in data || 'items' in data || 'entries' in data) {
+          const pageSize = options?.maxRows || 50;
+          // If pageNum not specified, assume page 1 (offset 0)
+          const pageNum = options?.pageNum ?? 1;
+          const offset = options?.offset ?? 0;
+          
+          cachePageData(expression, pageNum, (data as any).rows || (data as any).items || (data as any).entries || [], data, options);
+          (payload as any).pageSize = pageSize;
+          (payload as any).currentPage = pageNum;
+          (payload as any).offset = offset;
+        }
+        
+        await view?.sendData(payload as any);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         vscode.window.showErrorMessage(`.NET Visualizer: ${msg}`);

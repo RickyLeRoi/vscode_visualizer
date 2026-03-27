@@ -10,6 +10,6 @@
     "skipLibCheck": true,
     "sourceMap": true
   },
-  "include": ["src"],
+  "include": ["src", "media"],
   "exclude": ["node_modules", ".vscode-test", "out"]
 }

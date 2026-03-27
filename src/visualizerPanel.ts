@@ -64,6 +64,16 @@ export class VisualizerPanel {
     }, 100);
   }
 
+  public static sendRowUpdate(rowIndex: number, rowData: string[]): void {
+    if (VisualizerPanel.currentPanel) {
+      VisualizerPanel.currentPanel._panel.webview.postMessage({
+        command: 'row-update',
+        rowIndex,
+        rowData,
+      });
+    }
+  }
+
   // ─── HTML builder ────────────────────────────────────────────────────────────
 
   private _buildHtml(webview: vscode.Webview): string {

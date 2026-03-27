@@ -62,6 +62,9 @@ export class VisualizerView implements vscode.WebviewViewProvider {
       if (msg.command === 'requestMore' && typeof msg.expression === 'string') {
         // Forward to extension command which will perform a re-inspect with larger limits
         vscode.commands.executeCommand('dotnetVisualizer.requestMore', msg.expression);
+      } else if (msg.command === 'changePage' && typeof msg.expression === 'string' && typeof msg.pageNum === 'number') {
+        // Forward pagination request to extension command
+        vscode.commands.executeCommand('dotnetVisualizer.changePage', msg.expression, msg.pageNum, msg.pageSize);
       }
     });
 
@@ -106,6 +109,23 @@ export class VisualizerView implements vscode.WebviewViewProvider {
       this._view.webview.postMessage({ command: 'clear' });
     } else {
       this._pendingData = undefined;
+    }
+  }
+
+  /**
+   * Send a progressive row update to the webview as it becomes available.
+   */
+  public sendRowUpdate(rowIndex: number, rowData: string[]): void {
+    const now = new Date();
+    const ms = String(now.getMilliseconds()).padStart(3, '0');
+    const timeStr = now.toLocaleTimeString('it-IT', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    console.error(`[${timeStr}.${ms}] sendRowUpdate: row ${rowIndex}, data length ${rowData.length}`);
+    if (this._view) {
+      this._view.webview.postMessage({
+        command: 'row-update',
+        rowIndex,
+        rowData,
+      });
     }
   }
 
