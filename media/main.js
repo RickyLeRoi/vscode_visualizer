@@ -42,6 +42,18 @@
     } else if (msg.command === 'rerender') {
       // Panel became visible again — re-apply button state based on currentData
       render();
+    } else if (msg.command === 'clear') {
+      // Debugger stopped or cleared — show "Start debugger first"
+      currentData = null;
+      activeTableIndex = 0;
+      sortCol = -1;
+      sortAsc = true;
+      filterText = searchInput.value = '';
+      clearUI(false);
+    } else if (msg.command === 'waiting') {
+      // No active debug session — show "Start debugger first"
+      currentData = null;
+      clearUI(false);
     }
   });
 
@@ -86,15 +98,41 @@
     }
   });
 
+  // ── State-aware UI reset ──────────────────────────────────────────────────
+
+  function clearUI(isWaiting = true) {
+    // Hide all interactive buttons and content when there's no data
+    if (btnOpenValue) btnOpenValue.style.display = 'none';
+    if (btnShowMore)  btnShowMore.style.display = 'none';
+    if (searchInput)  searchInput.style.display = 'none';
+    if (btnExport)    btnExport.style.display = 'none';
+    if (btnCopy)      btnCopy.style.display = 'none';
+    if (tabsEl)       tabsEl.innerHTML = '';
+    if (contentEl)    contentEl.innerHTML = '';
+    
+    // Update title based on state
+    if (titleEl) {
+      titleEl.textContent = isWaiting ? '⏳ Waiting for data…' : '❌ Start debugger first';
+    }
+  }
+
   // ── Main render ────────────────────────────────────────────────────────────
 
   function render() {
-    // Always reset contextual buttons first — handles retained-context state
-    // when the panel is re-shown without new data arriving.
+    if (!currentData) {
+      clearUI(true);
+      return;
+    }
+    
+    // Data is available — show all interactive buttons
+    if (searchInput)  searchInput.style.display = 'block';
+    if (btnExport)    btnExport.style.display = 'inline-block';
+    if (btnCopy)      btnCopy.style.display = 'inline-block';
+    
+    // Reset contextual buttons (View, Show More)
     if (btnOpenValue) { btnOpenValue.style.display = 'none'; btnOpenValue.onclick = null; }
     if (btnShowMore)  { btnShowMore.style.display  = 'none'; btnShowMore.onclick  = null; }
 
-    if (!currentData) return;
     tabsEl.innerHTML = '';
 
     switch (currentData.kind) {
@@ -644,4 +682,7 @@
       `Increase "dotnetVisualizer.maxRows" / "dotnetVisualizer.maxItems" in Settings for more.`;
     return div;
   }
+
+  // ── Initialize on page load ────────────────────────────────────────────────
+  clearUI(false);
 })();

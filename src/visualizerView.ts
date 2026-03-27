@@ -97,6 +97,18 @@ export class VisualizerView implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Clear the sidebar when the debug session ends.
+   * Shows "Start debugger first" message.
+   */
+  public clearData(): void {
+    if (this._view) {
+      this._view.webview.postMessage({ command: 'clear' });
+    } else {
+      this._pendingData = undefined;
+    }
+  }
+
   // ─── HTML builder (same structure as VisualizerPanel) ──────────────────────
 
   private _buildHtml(webview: vscode.Webview): string {

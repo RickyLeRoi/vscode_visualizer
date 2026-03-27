@@ -11,6 +11,13 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // ── Clear sidebar when debug session terminates ────────────────────────────
+  context.subscriptions.push(
+    vscode.debug.onDidTerminateDebugSession(() => {
+      visualizerView.clearData();
+    })
+  );
+
   // ── Command: right-click on a variable in the Variables panel ──────────────
   context.subscriptions.push(
     vscode.commands.registerCommand(
