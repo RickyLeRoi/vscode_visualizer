@@ -54,10 +54,10 @@ export class DebugInspector {
       return this.extractDictionary(expression, evalResult.type ?? 'Dictionary', evalResult.variablesReference);
     }
     if (this.matchesArray(typeName, resultStr)) {
-      return this.extractList(expression, evalResult.type ?? 'Array', 'array');
+      return this.extractList(expression, evalResult.type ?? 'Array', 'array', evalResult.variablesReference);
     }
     if (this.matchesList(typeName, resultStr)) {
-      return this.extractList(expression, evalResult.type ?? 'List', 'list');
+      return this.extractList(expression, evalResult.type ?? 'List', 'list', evalResult.variablesReference);
     }
 
     // Generic fallback
@@ -107,6 +107,19 @@ export class DebugInspector {
       t.includes('queue') ||
       t.includes('stack') ||
       r.toLowerCase().includes('count =')
+    );
+  }
+
+  /** Returns true only for types that support the [] indexer (T[], List<T>, IList<T>). */
+  private isIndexableByTypeName(t: string): boolean {
+    const lower = t.toLowerCase();
+    return (
+      lower.endsWith('[]') ||
+      lower.startsWith('system.array') ||
+      lower.includes('list`1') ||
+      lower.includes('list<') ||
+      lower.includes('ilist`1') ||
+      lower.includes('ilist<')
     );
   }
 
@@ -174,13 +187,19 @@ export class DebugInspector {
   }
 
   // ─── List / Array extractor ─────────────────────────────────────────────────
+  //
+  // Uses a hybrid approach:
+  //   1. Try [] indexing (fast, works for T[], List<T>, IList<T>)
+  //   2. If [] fails (HashSet, Queue, Stack, etc.) fall back to the DAP
+  //      `variables` protocol — same strategy used for dictionaries.
 
   async extractList(
     expr: string,
     typeName: string,
-    kind: 'list' | 'array'
+    kind: 'list' | 'array',
+    variablesRef = 0
   ): Promise<ListData> {
-    // Arrays use .Length, Lists use .Count
+    // Determine count
     let totalCount = await this.safeEvalInt(`${expr}.Length`);
     if (totalCount === 0) {
       totalCount = await this.safeEvalInt(`${expr}.Count`);
@@ -188,14 +207,58 @@ export class DebugInspector {
 
     const fetchCount = Math.min(totalCount, this.maxItems);
     const truncated = totalCount > this.maxItems;
-
     const items: ItemData[] = [];
-    for (let i = 0; i < fetchCount; i++) {
-      const value = await this.safeEvalString(
-        `${expr}[${i}] == null ? "(null)" : ${expr}[${i}].ToString()`,
-        '(error)'
-      );
-      items.push({ index: i, value });
+
+    // ── Decide strategy from type name (avoids triggering CS0021 on HashSet etc.) ─
+    // Only T[] and List<T>/IList<T> support the [] indexer.
+    // HashSet, SortedSet, Queue, Stack, IEnumerable → must use DAP variables.
+    const useIndexer = this.isIndexableByTypeName(typeName);
+
+    if (useIndexer) {
+      // ── Indexer path (T[], List<T>) ────────────────────────────────────────
+      if (fetchCount > 0) {
+        for (let i = 0; i < fetchCount; i++) {
+          const value = await this.safeEvalString(
+            `${expr}[${i}] == null ? "(null)" : ${expr}[${i}].ToString()`,
+            '(error)'
+          );
+          items.push({ index: i, value });
+        }
+      }
+    } else {
+      // ── DAP variables path (HashSet, Queue, Stack, SortedSet, …) ──────────
+      // Always attempt this path regardless of fetchCount — safeEvalInt may
+      // have returned 0 for Count even though the collection is non-empty.
+      // 'hover' context may return variablesReference=0; fall back to 'repl'
+      // which is safe here (CS0433 only affects Dictionary, not Set/Queue/Stack).
+      if (variablesRef === 0) {
+        try {
+          const repl = await this.evaluate(expr, 'repl');
+          variablesRef = repl.variablesReference;
+        } catch { /* ignore */ }
+      }
+      if (variablesRef > 0) {
+        try {
+          const resp = await this.session.customRequest('variables', { variablesReference: variablesRef });
+          const vars: any[] = resp.variables ?? [];
+          const SKIP = new Set(['Count', 'Capacity', '[Raw View]', 'Raw View', 'static members']);
+
+          for (const v of vars) {
+            const name: string = String(v.name ?? '');
+            if (SKIP.has(name)) { continue; }
+
+            const idx = items. length;
+            // Name is usually [0], [1], … — strip brackets if present
+            const displayIdx = /^\[\d+\]$/.test(name) ? parseInt(name.slice(1, -1), 10) : idx;
+            items.push({ index: displayIdx, value: String(v.value ?? '') });
+            if (items.length >= this.maxItems) { break; }
+          }
+        } catch {
+          // leave items empty
+        }
+      }
+
+      if (totalCount === 0) { totalCount = items.length; }
     }
 
     return {
@@ -249,8 +312,22 @@ export class DebugInspector {
           const name: string = String(v.name ?? '');
           if (SKIP.has(name) || name.startsWith('[Raw')) { continue; }
 
+          // Case C: ["key"] [DebugViewDictionaryItem]  (coreclr DebugView proxy format)
+          // Must be checked BEFORE Case B because the name starts with [ and ends with ]
+          if (name.includes('] [DebugViewDictionaryItem')) {
+            let rawKey = name.slice(0, name.indexOf('] [DebugViewDictionaryItem'));
+            if (rawKey.startsWith('[')) { rawKey = rawKey.slice(1); }
+            if ((rawKey.startsWith('"') && rawKey.endsWith('"')) ||
+                (rawKey.startsWith("'") && rawKey.endsWith("'"))) {
+              rawKey = rawKey.slice(1, -1);
+            }
+            entries.push({
+              key: rawKey || name,
+              value: String(v.value ?? ''),
+            });
+          }
           // Case A: [n] = KeyValuePair — must expand children to get Key/Value
-          if (/^\[\d+\]$/.test(name) && (v.variablesReference ?? 0) > 0) {
+          else if (/^\[\d+\]$/.test(name) && (v.variablesReference ?? 0) > 0) {
             try {
               const kvResp = await this.session.customRequest('variables', { variablesReference: v.variablesReference });
               const kvVars: any[] = kvResp.variables ?? [];
