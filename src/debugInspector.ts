@@ -247,7 +247,7 @@ export class DebugInspector {
             const name: string = String(v.name ?? '');
             if (SKIP.has(name)) { continue; }
 
-            const idx = items. length;
+            const idx = items.length;
             // Name is usually [0], [1], … — strip brackets if present
             const displayIdx = /^\[\d+\]$/.test(name) ? parseInt(name.slice(1, -1), 10) : idx;
             items.push({ index: displayIdx, value: String(v.value ?? '') });
