@@ -18,6 +18,13 @@ interface EvalResult {
   variablesReference: number;
 }
 
+const SKIP = new Set([
+  'Count', '[Count]', 'Length', '[Length]', 'Capacity',
+  'Comparer', 'Keys', 'Values', 'SyncRoot',
+  'IsReadOnly', 'IsSynchronized', 'IsFixedSize',
+  '[Raw View]', 'Raw View', 'static members', 'Non-Public members'
+]);
+
 export class DebugInspector {
   private readonly session: vscode.DebugSession;
   private readonly frameId: number | undefined;
@@ -241,7 +248,6 @@ export class DebugInspector {
         try {
           const resp = await this.session.customRequest('variables', { variablesReference: variablesRef });
           const vars: any[] = resp.variables ?? [];
-          const SKIP = new Set(['Count', 'Capacity', '[Raw View]', 'Raw View', 'static members']);
 
           for (const v of vars) {
             const name: string = String(v.name ?? '');
@@ -295,22 +301,15 @@ export class DebugInspector {
 
         // If .Count eval failed, try to read it from the variables list
         if (totalCount === 0) {
-          const countVar = topVars.find((v: any) => v.name === 'Count');
+          const countVar = topVars.find((v: any) => ['[Count]', 'Count'].includes(v.name));
           if (countVar) {
             totalCount = parseInt(String(countVar.value ?? '0'), 10) || 0;
           }
         }
 
-        // Names to skip — debugger pseudo-properties and non-entry fields
-        const SKIP = new Set([
-          'Count', 'Comparer', 'Keys', 'Values', 'SyncRoot',
-          'IsReadOnly', 'IsSynchronized', 'IsFixedSize',
-          '[Raw View]', 'static members',
-        ]);
-
         for (const v of topVars) {
           const name: string = String(v.name ?? '');
-          if (SKIP.has(name) || name.startsWith('[Raw')) { continue; }
+          if (SKIP.has(name)) { continue; }
 
           // Case C: ["key"] [DebugViewDictionaryItem]  (coreclr DebugView proxy format)
           // Must be checked BEFORE Case B because the name starts with [ and ends with ]
@@ -383,8 +382,16 @@ export class DebugInspector {
         const resp = await this.session.customRequest('variables', { variablesReference });
         const vars: any[] = (resp.variables ?? []).slice(0, 100);
         for (const v of vars) {
+          const name = String(v.name ?? '');
+          // Skip pseudo-properties like "Raw View"
+          if (SKIP.has(name)) { continue; }
+
+          // Strip type annotation from name — debugger formats ValueTuple fields as "FieldName [type]"
+          // Extract just the field name before the " [" delimiter
+          const cleanName = name.includes(' [') ? name.slice(0, name.indexOf(' [')) : name;
+
           properties.push({
-            name: String(v.name ?? ''),
+            name: cleanName,
             value: String(v.value ?? ''),
             typeName: v.type ? String(v.type) : undefined,
           });
