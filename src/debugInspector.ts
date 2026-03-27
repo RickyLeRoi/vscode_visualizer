@@ -36,8 +36,8 @@ export class DebugInspector {
     this.frameId = frameId;
 
     const cfg = vscode.workspace.getConfiguration('dotnetVisualizer');
-    this.maxRows = overrides?.maxRows ?? cfg.get<number>('maxRows', 50);
-    this.maxItems = overrides?.maxItems ?? cfg.get<number>('maxItems', 200);
+    this.maxRows = overrides?.maxRows ?? cfg.get<number>('maxRows', 100);
+    this.maxItems = overrides?.maxItems ?? cfg.get<number>('maxItems', 100);
   }
 
   // ─── Public entry point ─────────────────────────────────────────────────────
