@@ -74,6 +74,9 @@ export class VisualizerPanel {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js')
     );
+    const mdUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'media', 'markdown-it.min.js')
+    );
     const csp = webview.cspSource;
 
     return /* html */ `<!DOCTYPE html>
@@ -81,7 +84,7 @@ export class VisualizerPanel {
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src ${csp}; script-src 'nonce-${nonce}';">
+        content="default-src 'none'; style-src ${csp}; script-src 'nonce-${nonce}' ${mdUri} ${scriptUri};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${stylesUri}">
   <title>.NET Data Visualizer</title>
@@ -98,6 +101,7 @@ export class VisualizerPanel {
   <div id="tabs-container"></div>
   <div id="content"></div>
   <div id="status-bar"></div>
+  <script src="${mdUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

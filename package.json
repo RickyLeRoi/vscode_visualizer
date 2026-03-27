@@ -4,14 +4,14 @@
   "description": "Visualize DataSet, DataTable, List, Dictionary and other .NET collections during C# debugging in VS Code.",
   "version": "1.0.0",
   "publisher": "RickyLeRoi",
-  "repository": { 
-    "type": "git", 
-    "url": "https://github.com/RickyLeRoi/vscode_visualizer" 
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RickyLeRoi/vscode_visualizer"
   },
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#1e1e2e",
-    "theme": "dark" 
+    "theme": "dark"
   },
   "license": "MIT",
   "engines": {
@@ -32,10 +32,29 @@
     "Dictionary"
   ],
   "activationEvents": [
-    "onDebug"
+    "onDebug",
+    "onView:dotnetVisualizer.sidePanel"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dotnetVisualizer",
+          "title": ".NET Data Visualizer",
+          "icon": "media/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dotnetVisualizer": [
+        {
+          "type": "webview",
+          "id": "dotnetVisualizer.sidePanel",
+          "name": ".NET Data Visualizer"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "dotnetVisualizer.visualize",
@@ -82,17 +101,23 @@
       "properties": {
         "dotnetVisualizer.maxRows": {
           "type": "number",
-          "default": 500,
+          "default": 100,
           "minimum": 1,
           "maximum": 1000,
           "description": "Maximum number of DataTable rows to fetch (more rows = slower)."
         },
         "dotnetVisualizer.maxItems": {
           "type": "number",
-          "default": 2000,
+          "default": 100,
           "minimum": 1,
-          "maximum": 10000,
+          "maximum": 1000,
           "description": "Maximum number of List/Dictionary items to fetch."
+        }
+        ,
+        "dotnetVisualizer.liveVisualizer": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, the sidebar auto-updates to visualize the variable under the editor cursor on mouse clicks. Disable to require manual invocation."
         }
       }
     }
@@ -104,9 +129,10 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.7.1",
+    "markdown-it": "^14.0.0",
     "typescript": "^5.3.3"
   }
 }
